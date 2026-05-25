@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Honda Consórcio — Experiência RA</title>
+
+  <!-- A-Frame + MindAR (versão A-Frame — mais compatível com iOS Safari) -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      overflow: hidden;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* Cena AR fica oculta até o usuário clicar */
+    #ar-scene {
+      display: none;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ar-scene.active {
+      display: block;
+    }
+
+    /* ── Splash ── */
+    #splash {
+      position: fixed;
+      inset: 0;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      z-index: 100;
+      transition: opacity 0.6s ease;
+    }
+
+    #splash.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .honda-wordmark {
+      font-size: 42px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: -1px;
+    }
+
+    .honda-sub {
+      font-size: 13px;
+      font-weight: 400;
+      color: #E00000;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .splash-instruction {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 260px;
+    }
+
+    .splash-instruction strong {
+      color: #fff;
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .scan-ring {
+      width: 120px;
+      height: 120px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scan-ring::before,
+    .scan-ring::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid transparent;
+    }
+
+    .scan-ring::before {
+      border-top-color: #E00000;
+      border-right-color: #E00000;
+      animation: spin 1.4s linear infinite;
+    }
+
+    .scan-ring::after {
+      border-bottom-color: rgba(255,255,255,0.2);
+      border-left-color: rgba(255,255,255,0.2);
+      animation: spin 1.4s linear infinite reverse;
+    }
+
+    .scan-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scan-icon svg {
+      width: 28px;
+      height: 28px;
+      stroke: rgba(255,255,255,0.6);
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #btn-start {
+      background: #E00000;
+      color: #fff;
+      border: none;
+      padding: 14px 36px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      border-radius: 40px;
+      cursor: pointer;
+    }
+
+    /* ── HUD ── */
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      display: none;
+    }
+
+    #hud.active { display: block; }
+
+    .corner {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+    }
+
+    .corner::before, .corner::after {
+      content: '';
+      position: absolute;
+      background: #E00000;
+    }
+
+    .corner::before { width: 3px; height: 100%; }
+    .corner::after  { width: 100%; height: 3px; }
+
+    .corner.tl { top: 24px; left: 24px; }
+    .corner.tr { top: 24px; right: 24px; transform: scaleX(-1); }
+    .corner.bl { bottom: 24px; left: 24px; transform: scaleY(-1); }
+    .corner.br { bottom: 24px; right: 24px; transform: scale(-1); }
+
+    #track-status {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #fff;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 8px 20px;
+      border-radius: 20px;
+      border: 0.5px solid rgba(255,255,255,0.15);
+      white-space: nowrap;
+    }
+
+    #track-status.found { color: #4ade80; }
+
+    /* ── CTA ── */
+    #cta {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px 24px 40px;
+      background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 20;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+      pointer-events: none;
+    }
+
+    #cta.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    #cta-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    #btn-cta {
+      background: #E00000;
+      color: #fff;
+      border: none;
+      padding: 15px 40px;
+      font-size: 15px;
+      font-weight: 700;
+      border-radius: 40px;
+      cursor: pointer;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    /* ── Fogos ── */
+    #fireworks {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+      overflow: hidden;
+    }
+
+    .spark {
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0;
+    }
+
+    @keyframes burst {
+      0%   { transform: translate(0,0) scale(1); opacity: 1; }
+      80%  { opacity: 0.8; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
+
+    .confetti-piece {
+      position: absolute;
+      opacity: 0;
+    }
+
+    @keyframes confetti-fall {
+      0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── SPLASH ── -->
+<div id="splash">
+  <div>
+    <div class="honda-wordmark">HONDA</div>
+    <div class="honda-sub">Consórcio</div>
+  </div>
+
+  <div class="scan-ring">
+    <div class="scan-icon">
+      <svg viewBox="0 0 24 24">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+        <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+        <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <rect x="7" y="7" width="10" height="10" rx="1"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="splash-instruction">
+    <strong>Aponte para a capa do PDF</strong>
+    Hondinho e Hondinha vão aparecer em realidade aumentada
+  </div>
+
+  <button id="btn-start" onclick="startAR()">Abrir câmera</button>
+</div>
+
+<!-- ── CENA A-FRAME AR ── -->
+<a-scene id="ar-scene"
+  mindar-image="imageTargetSrc: assets/targets.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no;"
+  color-space="sRGB"
+  renderer="colorManagement: true"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false">
+
+  <a-assets>
+    <video id="hondinha-video"
+      src="assets/hondinha.mp4"
+      playsinline
+      webkit-playsinline
+      muted
+      loop
+      preload="auto">
+    </video>
+  </a-assets>
+
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+  <a-entity id="target-entity" mindar-image-target="targetIndex: 0">
+    <a-video
+      src="#hondinha-video"
+      position="0 0.15 0"
+      width="1.6"
+      height="0.9">
+    </a-video>
+  </a-entity>
+
+</a-scene>
+
+<!-- ── HUD ── -->
+<div id="hud">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div id="track-status">Procurando marcador...</div>
+</div>
+
+<!-- ── FOGOS ── -->
+<div id="fireworks"></div>
+
+<!-- ── CTA ── -->
+<div id="cta">
+  <div id="cta-label">Honda Consórcio</div>
+  <button id="btn-cta" onclick="openCTA()">Quero conhecer o Consórcio Honda</button>
+</div>
+
+<script>
+  const CTA_URL      = 'https://www.honda.com.br/consorcio';
+  const CTA_DELAY    = 4000;
+  let ctaShown       = false;
+  let ctaTimer       = null;
+
+  function startAR() {
+    // Mostra a cena AR
+    const scene = document.getElementById('ar-scene');
+    scene.classList.add('active');
+
+    // Esconde splash
+    document.getElementById('splash').classList.add('hidden');
+
+    // Ativa HUD
+    document.getElementById('hud').classList.add('active');
+
+    // Inicia o MindAR após a cena estar pronta
+    scene.addEventListener('loaded', () => {
+      const system = scene.systems['mindar-image-system'];
+      if (system) system.start();
+    }, { once: true });
+
+    // Fallback: tenta iniciar após 1.5s se loaded não disparar
+    setTimeout(() => {
+      const system = scene.systems['mindar-image-system'];
+      if (system && !system.started) system.start();
+    }, 1500);
+
+    // Eventos de tracking
+    const targetEl = document.getElementById('target-entity');
+
+    targetEl.addEventListener('targetFound', () => {
+      const video = document.getElementById('hondinha-video');
+      video.play().catch(() => {});
+
+      const status = document.getElementById('track-status');
+      status.textContent = '● Personagens encontrados';
+      status.classList.add('found');
+
+      if (!ctaShown) {
+        ctaTimer = setTimeout(() => {
+          launchFireworks();
+          showCTA();
+        }, CTA_DELAY);
+      }
+    });
+
+    targetEl.addEventListener('targetLost', () => {
+      const video = document.getElementById('hondinha-video');
+      video.pause();
+
+      const status = document.getElementById('track-status');
+      status.textContent = 'Procurando marcador...';
+      status.classList.remove('found');
+
+      clearTimeout(ctaTimer);
+    });
+  }
+
+  function showCTA() {
+    ctaShown = true;
+    document.getElementById('cta').classList.add('visible');
+  }
+
+  function openCTA() {
+    window.open(CTA_URL, '_blank');
+  }
+
+  // ── Fogos ──
+  const COLORS = ['#F5C518','#E00000','#ffffff','#ff6b35','#ffd700'];
+
+  function launchFireworks() {
+    const fw = document.getElementById('fireworks');
+    for (let r = 0; r < 3; r++) {
+      setTimeout(() => {
+        burst(fw, 20 + Math.random() * 60, 10 + Math.random() * 40, 20);
+      }, r * 600);
+    }
+    setTimeout(launchConfetti, 300);
+  }
+
+  function burst(container, cx, cy, count) {
+    for (let i = 0; i < count; i++) {
+      const spark  = document.createElement('div');
+      spark.className = 'spark';
+      const angle  = (360 / count) * i;
+      const dist   = 60 + Math.random() * 80;
+      const rad    = angle * Math.PI / 180;
+      const color  = COLORS[Math.floor(Math.random() * COLORS.length)];
+      const size   = 3 + Math.random() * 4;
+      spark.style.cssText = `
+        left:${cx}%; top:${cy}%;
+        background:${color};
+        width:${size}px; height:${size}px;
+        --tx:${Math.cos(rad)*dist}px; --ty:${Math.sin(rad)*dist}px;
+        animation: burst ${0.6+Math.random()*0.5}s ease-out ${Math.random()*0.2}s forwards;
+      `;
+      container.appendChild(spark);
+      setTimeout(() => spark.remove(), 1500);
+    }
+  }
+
+  function launchConfetti() {
+    const fw = document.getElementById('fireworks');
+    for (let i = 0; i < 40; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      const dur  = 2 + Math.random() * 2;
+      const del  = Math.random() * 1.5;
+      const size = 6 + Math.random() * 8;
+      piece.style.cssText = `
+        left:${Math.random()*100}%; top:-10px;
+        background:${COLORS[Math.floor(Math.random()*COLORS.length)]};
+        width:${size}px; height:${size*0.4}px;
+        border-radius:${Math.random()>.5?'50%':'1px'};
+        animation: confetti-fall ${dur}s ease-in ${del}s forwards;
+      `;
+      fw.appendChild(piece);
+      setTimeout(() => piece.remove(), (dur + del) * 1000 + 200);
+    }
+  }
+</script>
+</body>
+</html>
