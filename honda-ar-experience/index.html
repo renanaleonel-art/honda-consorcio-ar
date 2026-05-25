@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Honda Consórcio — Experiência RA</title>
+
+  <!-- Mind AR + Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* Fix iOS Safari — força canvas e vídeo interno do MindAR a cobrir a tela */
+    #container canvas,
+    #container video {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      object-fit: cover !important;
+    }
+
+    body {
+      background: #000;
+      overflow: hidden;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    #container {
+      position: fixed;
+      inset: 0;
+    }
+
+    /* ── Splash / Loading ── */
+    #splash {
+      position: fixed;
+      inset: 0;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      z-index: 100;
+      transition: opacity 0.6s ease;
+    }
+
+    #splash.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .splash-logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .honda-wordmark {
+      font-size: 42px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: -1px;
+      line-height: 1;
+    }
+
+    .honda-sub {
+      font-size: 13px;
+      font-weight: 400;
+      color: #E00000;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      width: 40px;
+      height: 2px;
+      background: #E00000;
+    }
+
+    .splash-instruction {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 260px;
+    }
+
+    .splash-instruction strong {
+      color: #fff;
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    /* Anel de scan animado */
+    .scan-ring {
+      width: 120px;
+      height: 120px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scan-ring::before,
+    .scan-ring::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid transparent;
+    }
+
+    .scan-ring::before {
+      border-top-color: #E00000;
+      border-right-color: #E00000;
+      animation: spin 1.4s linear infinite;
+    }
+
+    .scan-ring::after {
+      border-bottom-color: rgba(255,255,255,0.2);
+      border-left-color: rgba(255,255,255,0.2);
+      animation: spin 1.4s linear infinite reverse;
+    }
+
+    .scan-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scan-icon svg {
+      width: 28px;
+      height: 28px;
+      stroke: rgba(255,255,255,0.6);
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Botão Start ── */
+    #btn-start {
+      background: #E00000;
+      color: #fff;
+      border: none;
+      padding: 14px 36px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      border-radius: 40px;
+      cursor: pointer;
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    #btn-start:active {
+      transform: scale(0.96);
+      background: #b80000;
+    }
+
+    /* ── HUD de rastreamento ── */
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      display: none;
+    }
+
+    #hud.active { display: block; }
+
+    /* Cantos do frame */
+    .corner {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+    }
+
+    .corner::before,
+    .corner::after {
+      content: '';
+      position: absolute;
+      background: #E00000;
+    }
+
+    .corner::before { width: 3px; height: 100%; }
+    .corner::after  { width: 100%; height: 3px; }
+
+    .corner.tl { top: 24px; left: 24px; }
+    .corner.tr { top: 24px; right: 24px; transform: scaleX(-1); }
+    .corner.bl { bottom: 24px; left: 24px; transform: scaleY(-1); }
+    .corner.br { bottom: 24px; right: 24px; transform: scale(-1); }
+
+    /* Status de tracking */
+    #track-status {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #fff;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 8px 20px;
+      border-radius: 20px;
+      border: 0.5px solid rgba(255,255,255,0.15);
+      white-space: nowrap;
+      transition: opacity 0.4s;
+    }
+
+    #track-status.found { color: #4ade80; }
+
+    /* ── CTA Final ── */
+    #cta {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px 24px 32px;
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 20;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+      pointer-events: none;
+    }
+
+    #cta.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    #cta-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    #btn-cta {
+      background: #E00000;
+      color: #fff;
+      border: none;
+      padding: 15px 40px;
+      font-size: 15px;
+      font-weight: 700;
+      border-radius: 40px;
+      cursor: pointer;
+      width: 100%;
+      max-width: 320px;
+      letter-spacing: 0.3px;
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    #btn-cta:active {
+      transform: scale(0.97);
+      background: #b80000;
+    }
+
+    /* ── Fogos de artifício CSS ── */
+    #fireworks {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+      overflow: hidden;
+    }
+
+    .spark {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      opacity: 0;
+    }
+
+    @keyframes burst {
+      0%   { transform: translate(0,0) scale(1); opacity: 1; }
+      80%  { opacity: 0.8; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
+
+    /* ── Partícula de confete ── */
+    .confetti-piece {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      opacity: 0;
+      border-radius: 1px;
+    }
+
+    @keyframes confetti-fall {
+      0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+    }
+
+    /* ── Overlay de permissão de câmera ── */
+    #cam-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 200;
+      text-align: center;
+      padding: 32px;
+    }
+
+    #cam-overlay.hidden { display: none; }
+
+    #cam-overlay p {
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 280px;
+    }
+
+    #cam-overlay strong {
+      color: #fff;
+      font-size: 18px;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    #btn-cam {
+      background: #E00000;
+      color: #fff;
+      border: none;
+      padding: 13px 32px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 40px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── SPLASH ── -->
+<div id="splash">
+  <div class="splash-logo">
+    <div class="honda-wordmark">HONDA</div>
+    <div class="honda-sub">Consórcio</div>
+  </div>
+
+  <div class="scan-ring">
+    <div class="scan-icon">
+      <svg viewBox="0 0 24 24">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+        <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+        <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <rect x="7" y="7" width="10" height="10" rx="1"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="splash-instruction">
+    <strong>Aponte para a capa do PDF</strong>
+    Hondinho e Hondinha vão aparecer em realidade aumentada
+  </div>
+
+  <button id="btn-start" onclick="startAR()">Abrir câmera</button>
+</div>
+
+<!-- ── OVERLAY CÂMERA ── -->
+<div id="cam-overlay" class="hidden">
+  <p>
+    <strong>Permita o acesso à câmera</strong>
+    Para a experiência funcionar, autorize o uso da câmera quando seu navegador solicitar.
+  </p>
+  <button id="btn-cam" onclick="document.getElementById('cam-overlay').classList.add('hidden')">Entendido</button>
+</div>
+
+<!-- ── CONTAINER RA ── -->
+<div id="container"></div>
+
+<!-- ── HUD ── -->
+<div id="hud">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div id="track-status">Procurando marcador...</div>
+</div>
+
+<!-- ── FOGOS ── -->
+<div id="fireworks"></div>
+
+<!-- ── CTA FINAL ── -->
+<div id="cta">
+  <div id="cta-label">Honda Consórcio</div>
+  <button id="btn-cta" onclick="openCTA()">Quero conhecer o Consórcio Honda</button>
+</div>
+
+<script>
+  // ── CONFIG — edite aqui ──────────────────────────────────────────
+  const CONFIG = {
+    targetSrc:  'assets/targets.mind',
+    videoSrc:   'assets/hondinha.mp4',
+    ctaURL:     'https://www.honda.com.br/consorcio',
+    videoDuration: 5000,
+    ctaDelay:   4000,
+  };
+  // ────────────────────────────────────────────────────────────────
+
+  let mindarThree = null;
+  let videoEl     = null;
+  let ctaTimer    = null;
+  let ctaShown    = false;
+
+  async function startAR() {
+    document.getElementById('splash').classList.add('hidden');
+    document.getElementById('hud').classList.add('active');
+    document.getElementById('cam-overlay').classList.remove('hidden');
+
+    await new Promise(r => setTimeout(r, 400));
+    document.getElementById('cam-overlay').classList.add('hidden');
+
+    await initMindAR();
+  }
+
+  async function initMindAR() {
+    const { MindARThree } = window.MINDAR.IMAGE;
+
+    mindarThree = new MindARThree({
+      container:        document.getElementById('container'),
+      imageTargetSrc:   CONFIG.targetSrc,
+      maxTrack:         1,
+      uiLoading:        'no',
+      uiScanning:       'no',
+      uiError:          'no',
+    });
+
+    const { renderer, scene, camera } = mindarThree;
+
+    // Fix iOS: garante tamanho correto do renderer
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // ── Vídeo como textura ──
+    videoEl = document.createElement('video');
+    videoEl.src          = CONFIG.videoSrc;
+    videoEl.crossOrigin  = 'anonymous';
+    videoEl.loop         = true;
+    videoEl.muted        = true;
+    videoEl.playsInline  = true;
+    videoEl.preload      = 'auto';
+
+    const videoTexture = new THREE.VideoTexture(videoEl);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+
+    // Plano com proporção 16:9 do vídeo
+    const geometry = new THREE.PlaneGeometry(1.6, 0.9);
+    const material = new THREE.MeshBasicMaterial({
+      map:         videoTexture,
+      side:        THREE.DoubleSide,
+      transparent: true,
+    });
+
+    const plane = new THREE.Mesh(geometry, material);
+    plane.position.set(0, 0.15, 0);
+
+    // Âncora Mind AR — índice 0
+    const anchor = mindarThree.addAnchor(0);
+    anchor.group.add(plane);
+
+    // ── Eventos de tracking ──
+    anchor.onTargetFound = () => { onTrackFound(); };
+    anchor.onTargetLost  = () => { onTrackLost(); };
+
+    // Renderização
+    renderer.setAnimationLoop(() => {
+      renderer.render(scene, camera);
+    });
+
+    try {
+      await mindarThree.start();
+      // Fix iOS: força resize após start para garantir dimensões corretas
+      window.dispatchEvent(new Event('resize'));
+    } catch (e) {
+      console.error('MindAR error:', e);
+      document.getElementById('cam-overlay').classList.remove('hidden');
+    }
+  }
+
+  function onTrackFound() {
+    const status = document.getElementById('track-status');
+    status.textContent = '● Personagens encontrados';
+    status.classList.add('found');
+
+    videoEl.play().catch(() => {});
+
+    if (!ctaShown) {
+      ctaTimer = setTimeout(() => {
+        launchFireworks();
+        showCTA();
+      }, CONFIG.ctaDelay);
+    }
+  }
+
+  function onTrackLost() {
+    const status = document.getElementById('track-status');
+    status.textContent = 'Procurando marcador...';
+    status.classList.remove('found');
+    videoEl.pause();
+    clearTimeout(ctaTimer);
+  }
+
+  function showCTA() {
+    ctaShown = true;
+    document.getElementById('cta').classList.add('visible');
+  }
+
+  function openCTA() {
+    window.open(CONFIG.ctaURL, '_blank');
+  }
+
+  // ── Fogos de artifício ──────────────────────────────────────────
+  const COLORS = ['#F5C518', '#E00000', '#ffffff', '#ff6b35', '#ffd700'];
+
+  function launchFireworks() {
+    const fw = document.getElementById('fireworks');
+    const rounds = 3;
+
+    for (let r = 0; r < rounds; r++) {
+      setTimeout(() => {
+        const cx = 20 + Math.random() * 60;
+        const cy = 10 + Math.random() * 40;
+        burst(fw, cx, cy, 20);
+      }, r * 600);
+    }
+
+    setTimeout(() => launchConfetti(), 300);
+  }
+
+  function burst(container, cx, cy, count) {
+    for (let i = 0; i < count; i++) {
+      const spark = document.createElement('div');
+      spark.className = 'spark';
+      const angle  = (360 / count) * i;
+      const dist   = 60 + Math.random() * 80;
+      const rad    = (angle * Math.PI) / 180;
+      const tx     = Math.cos(rad) * dist;
+      const ty     = Math.sin(rad) * dist;
+      const color  = COLORS[Math.floor(Math.random() * COLORS.length)];
+
+      spark.style.cssText = `
+        left: ${cx}%;
+        top:  ${cy}%;
+        background: ${color};
+        --tx: ${tx}px;
+        --ty: ${ty}px;
+        animation: burst ${0.6 + Math.random() * 0.5}s ease-out forwards;
+        animation-delay: ${Math.random() * 0.2}s;
+        width: ${3 + Math.random() * 4}px;
+        height: ${3 + Math.random() * 4}px;
+      `;
+
+      container.appendChild(spark);
+      setTimeout(() => spark.remove(), 1500);
+    }
+  }
+
+  function launchConfetti() {
+    const fw = document.getElementById('fireworks');
+    const count = 40;
+
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+      const left  = Math.random() * 100;
+      const delay = Math.random() * 1.5;
+      const dur   = 2 + Math.random() * 2;
+      const size  = 6 + Math.random() * 8;
+
+      piece.style.cssText = `
+        left: ${left}%;
+        top: -10px;
+        background: ${color};
+        width: ${size}px;
+        height: ${size * 0.4}px;
+        border-radius: ${Math.random() > 0.5 ? '50%' : '1px'};
+        animation: confetti-fall ${dur}s ease-in ${delay}s forwards;
+      `;
+
+      fw.appendChild(piece);
+      setTimeout(() => piece.remove(), (dur + delay) * 1000 + 200);
+    }
+  }
+</script>
+</body>
+</html>
